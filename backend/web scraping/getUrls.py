@@ -6,7 +6,7 @@ import calendar
 import os
 import time
 
-API_KEY = "b1f0989fc71dd0e8333d3e7d23da4fb4"
+API_KEY = ""
 
 # Step 1: Get previous month/year
 today = datetime.now()
@@ -69,3 +69,4 @@ if os.path.exists(URLS_FILE):
         f.write("\n".join(unique_urls))
 
     print(f"🧹 Removed duplicates — {len(unique_urls)} unique URLs remain in {URLS_FILE}")
+
