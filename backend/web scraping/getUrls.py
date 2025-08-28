@@ -68,5 +68,6 @@ if os.path.exists(URLS_FILE):
     with open(URLS_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(unique_urls))
 
-    print(f"🧹 Removed duplicates — {len(unique_urls)} unique URLs remain in {URLS_FILE}")
+    print(f"Removed duplicates — {len(unique_urls)} unique URLs remain in {URLS_FILE}")
+
 
