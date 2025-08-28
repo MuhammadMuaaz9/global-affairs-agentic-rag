@@ -5,8 +5,11 @@ An AI-powered chat platform for global affairs, international relations. It uses
 ## Features
 
 - Real-time chat via WebSocket
-- News/document retrieval using Pinecone and OpenAI embeddings
 - Scrape data/news articles from the Reuters website 
+- Streaming Responses: Return answers word-by-word for a smoother chat experience
+- Included the source URL in the agent’s responses, so users can click to view the original article. 
+- Implemented message trimming to avoid exceeding token limits.
+- News/document retrieval using Pinecone and OpenAI embeddings
 - Persistent conversation history (PostgreSQL)
 - Semantic search, query rewriting, and relevance grading
 - Frontend served as static files
