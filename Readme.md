@@ -30,6 +30,7 @@ An AI-powered chat platform for global affairs and international relations. It u
 ## Project Structure
 
 ```
+project/
 ├── backend/
 │   ├── app/
 │   │   ├── slices/
@@ -39,15 +40,14 @@ An AI-powered chat platform for global affairs and international relations. It u
 │   │   └── server.py
 │   ├── graph.py
 │   ├── main.py
-│   ├── requirements.txt
-│   ├── global-affairs-rag-firebase-adminsdk.json
-│   └── myenv/ (virtual environment)
 ├── frontend/
 │   ├── index.html
 │   ├── myscript.js
 │   └── style.css
-├── reuters_articles.json
 ├── .gitignore
+├── requirements.txt
+├── global-affairs-rag-firebase-adminsdk.json
+├── myenv/ (virtual environment)
 └── Readme.md
 ```
 
@@ -55,23 +55,19 @@ An AI-powered chat platform for global affairs and international relations. It u
 
 ### Backend Setup
 
-1. Navigate to backend:
+1. Activate the virtual environment:
    ```powershell
-   cd backend
+   .\myenv\Scripts\Activate
    ```
-2. Activate the virtual environment:
-   ```powershell
-   .\myenv\Scripts\Activate.ps1
-   ```
-3. Install dependencies:
+2. Install dependencies:
    ```powershell
    pip install -r requirements.txt
    ```
-4. Set up environment variables:
+3. Set up environment variables:
    - Create a `.env` file with your OpenAI, Pinecone, and other API keys.
-5. Run the backend server:
+4. Run the backend server:
    ```powershell
-   uvicorn app.server:app --reload
+   uvicorn backend.main:app --reload
    ```
 
 ### Frontend
@@ -103,5 +99,6 @@ An AI-powered chat platform for global affairs and international relations. It u
 - [OpenAI](https://openai.com/)
 - [Pinecone](https://www.pinecone.io/)
 - [FastAPI](https://fastapi.tiangolo.com/)
+
 
 👨‍💻 Author: Muhammad Muaaz
