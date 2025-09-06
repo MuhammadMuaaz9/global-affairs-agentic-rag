@@ -1,0 +1,17 @@
+# Python caches
+__pycache__/
+
+# Virtual environment
+myenv/
+
+# dotenv
+.env
+
+# Logs
+*.log
+
+# Firebase credentials
+./global-affairs-rag-firebase-adminsdk.json
+
+# Ignore reuters_articles.json if not needed
+reuters_articles.json
