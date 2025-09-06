@@ -1,11 +1,11 @@
 // Firebase configuration and initialization
 const firebaseConfig = {
-  apiKey: "AIzaSyCj1KNnjBlCPgXOVS-1mIx6kmNai3bUDSE",
-  authDomain: "global-affairs-rag.firebaseapp.com",
-  projectId: "global-affairs-rag",
-  storageBucket: "global-affairs-rag.firebasestorage.app",
-  messagingSenderId: "788187483734",
-  appId: "1:788187483734:web:0539fc06bed8c2f30a75f7"
+  apiKey: "",
+  authDomain: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
 };
 
 firebase.initializeApp(firebaseConfig);
@@ -493,4 +493,5 @@ window.addEventListener('beforeunload', function() {
     if (ws) {
         ws.close();
     }
+
 });
