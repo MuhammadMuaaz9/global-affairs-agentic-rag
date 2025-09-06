@@ -1,0 +1,3 @@
+"""Chats vertical slice package."""
+
+
