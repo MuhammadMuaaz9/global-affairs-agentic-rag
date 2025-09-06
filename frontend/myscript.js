@@ -1,11 +1,11 @@
 // Firebase configuration and initialization
 const firebaseConfig = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyCj1KNnjBlCPgXOVS-1mIx6kmNai3bUDSE",
+  authDomain: "global-affairs-rag.firebaseapp.com",
+  projectId: "global-affairs-rag",
+  storageBucket: "global-affairs-rag.firebasestorage.app",
+  messagingSenderId: "788187483734",
+  appId: "1:788187483734:web:0539fc06bed8c2f30a75f7"
 };
 
 firebase.initializeApp(firebaseConfig);
@@ -14,22 +14,39 @@ const auth = firebase.auth();
 // Auth state variables
 let currentUser = null;
 
+// Helpers to attach Firebase ID token
+async function getIdToken() {
+    const u = auth.currentUser;
+    if (!u) return null;
+    try { return await u.getIdToken(); } catch { return null; }
+}
+
+async function fetchWithAuth(input, init = {}) {
+    const token = await getIdToken();
+    const headers = new Headers(init.headers || {});
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    return fetch(input, { ...init, headers });
+}
+
 // Auth state listener
 auth.onAuthStateChanged((user) => {
     if (user) {
         currentUser = user;
+        user.getIdToken().then(t => localStorage.setItem('firebase_id_token', t)).catch(() => {});
         console.log("User logged in:", user.email);
         startNewChat();
         loadSidebarChats();
         show_view('.new-chat-view');
     } else {
         currentUser = null;
+        localStorage.removeItem('firebase_id_token');
         showAuthModal();
     }
 });
 
 // Auth functions
 function showAuthModal() {
+    
     // Create auth modal HTML
     const authModalHTML = `
         <div id="auth-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center;">
@@ -113,46 +130,46 @@ const sendButton = document.querySelector('.send-button');
 
 // WebSocket creation
 function createWebSocket(threadId) {
-
     if (!currentUser) {
         console.error("No user logged in");
         return;
     }
 
-    if (ws) {
-        ws.onclose = null;
-        ws.onerror = null;
-        ws.onmessage = null;
-        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-            ws.close();
-        }
-    }
-    
-    const userThreadId = `${currentUser.uid}_${threadId}`;
-    ws = new WebSocket(`ws://localhost:8002/ws/${userThreadId}/${currentUser.uid}`);
-    
-    ws.onopen = function() {
-        console.log(`WebSocket connected to thread: ${threadId}`);
-    };
-    
-    ws.onmessage = function(event) {
-        fullMessage += event.data;
-        if (currentAssistantMessage) {
-            const content = currentAssistantMessage.querySelector('.content p');
-            content.innerHTML = makeLinksClickable(fullMessage);
-            scrollToBottom();
-        }
-    };
-    
-    ws.onclose = function(event) {
-        console.log(`WebSocket closed: ${event.code} - ${event.reason}`);
-        ws = null;
-    };
-    
-    ws.onerror = function(error) {
-        console.error('WebSocket error:', error);
-    };
+    getIdToken().then(token => {
+        const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+        const host = location.host;
+        
+        // Use original threadId and userId separately
+        const url = `${wsProto}://${host}/ws/${threadId}/${currentUser.uid}?token=${encodeURIComponent(token || '')}`;
+        
+        console.log("Opening WebSocket with URL:", url); // Debug
+        
+        ws = new WebSocket(url);
+        
+        ws.onopen = function() {
+            console.log(`WebSocket connected to thread: ${threadId}`);
+        };
+        
+        ws.onmessage = function(event) {
+            fullMessage += event.data;
+            if (currentAssistantMessage) {
+                const content = currentAssistantMessage.querySelector('.content p');
+                content.innerHTML = makeLinksClickable(fullMessage);
+                scrollToBottom();
+            }
+        };
+        
+        ws.onclose = function(event) {
+            console.log(`WebSocket closed: ${event.code} - ${event.reason}`);
+            ws = null;
+        };
+        
+        ws.onerror = function(error) {
+            console.error('WebSocket error:', error);
+        };
+    });
 }
+
 
 // Message sending with proper validation
 function sendMessage() {
@@ -167,7 +184,7 @@ function sendMessage() {
     const isOnHomePage = newChatView && newChatView.style.display !== 'none';
     
     if (isOnHomePage) {
-        //  add to sidebar with CURRENT threadId
+        // add to sidebar with CURRENT threadId
         addChatToSidebar(currentThreadId, message);
     }
     
@@ -227,6 +244,7 @@ function scrollToBottom() {
 }
 
 function addUserMessage(message) {
+    // console.log("Adding user message:", message);
     const conversationView = document.querySelector('.conversation-view');
     const userMessageHTML = `
         <div class="user message">
@@ -314,21 +332,22 @@ function addChatToSidebar(threadId, title = "New Chat") {
 
 async function loadChatHistory(threadId) {
     try {
-        const response = await fetch(`/chat/${threadId}`);
+        const response = await fetchWithAuth(`/chat/${threadId}`);
         const data = await response.json();
         console.log("Chat history data: ", data);
         
         clearConversation();
             
         data.messages.forEach(msg => {
-            if (msg.type === 'human') {
+            if (msg.role === 'human') {
                 addUserMessage(msg.content);
-            } else if (msg.type === 'ai') {
+            } else if (msg.role === 'ai') {
                 addAssistantMessageComplete(msg.content);
             }
         });
         
-    } catch (error) {
+    } 
+    catch (error) {
         console.error('Failed to load chat history:', error);
     }
 }
@@ -339,7 +358,7 @@ async function loadSidebarChats() {
     try {
         console.log("loadSidebarChats called");
         
-        const response = await fetch(`/chats/${currentUser.uid}`);
+        const response = await fetchWithAuth(`/chats/${currentUser.uid}`);
         const data = await response.json();
         console.log("Sidebar chats data: ", data);
         
@@ -376,6 +395,7 @@ async function loadSidebarChats() {
 // Separate function for conversation button listeners
 function setupConversationButtonListeners() {
     document.querySelectorAll(".conversation-button").forEach(button => {
+        
         // Remove existing listener to prevent duplicates
         button.removeEventListener("click", handleConversationClick);
         button.addEventListener("click", handleConversationClick);
