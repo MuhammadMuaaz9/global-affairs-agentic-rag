@@ -1,5 +1,5 @@
 from langgraph.graph import MessagesState
-from langchain.chat_models import init_chat_model
+from langchain_openai import ChatOpenAI
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -13,31 +13,53 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
+from prompts import GRADE_PROMPT, REWRITE_PROMPT, GENERATE_PROMPT, sys_msg
 
+
+# Load environment variables
+load_dotenv()
 # ===============================================================================
 # ---- PostgreSQL Connection ----
 
-DB_URI = "postgresql://postgres:mypost@localhost:5432/langgraph_memory?sslmode=disable"
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+
+DB_URI = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=disable"
 
 # Global variables
 checkpointer = None
 graph = None
+_conn = None
 
 async def setup_checkpointer():
     """Initialize the async PostgreSQL checkpointer"""
     
     global checkpointer
+    global _conn
     
-    # Use psycopg AsyncConnection, not asyncpg
-    conn = await AsyncConnection.connect(
+    # Use psycopg AsyncConnection
+    _conn = await AsyncConnection.connect(
         DB_URI,
         autocommit=True,
         row_factory=dict_row
     )
-    checkpointer = AsyncPostgresSaver(conn)
+    checkpointer = AsyncPostgresSaver(_conn)
 
     await checkpointer.setup()
     return checkpointer
+
+
+async def shutdown_checkpointer():
+    """Close DB connection if open."""
+    global _conn
+    try:
+        if _conn is not None:
+            await _conn.close()
+    except Exception:
+        pass
 
 async def get_graph():
     """Get or initialize the compiled graph with checkpointer"""
@@ -46,16 +68,13 @@ async def get_graph():
     
     if graph is None:
         checkpointer = await setup_checkpointer()
-        graph = workflow.compile(checkpointer=checkpointer)  # your workflow
+        graph = workflow.compile(checkpointer=checkpointer)
     
     return graph    
 
 
 # ===============================================================================
 # Initialize OpenAI and Pinecone clients
-
-# Load environment variables
-load_dotenv()
 
 # Get API keys
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -94,6 +113,8 @@ def retriever_tool(query: str):
     # Format results
     return [
         {
+            # "score": match["score"],
+            # "title": match["metadata"]["title"],
             "url": match["metadata"]["url"],
             "snippet": match["metadata"]["text"][:200] + "..."
         } for match in results["matches"]
@@ -102,7 +123,7 @@ def retriever_tool(query: str):
 # ===============================================================================
 # Define the response model and generate_query_or_respond
 
-response_model = init_chat_model("openai:gpt-4.1", temperature=0, streaming=True)
+response_model = ChatOpenAI(model="gpt-4.1", temperature=0, streaming=True)
 
 def generate_query_or_respond(state: MessagesState):
     """Call the model to generate a response based on the current state. Given
@@ -110,18 +131,6 @@ def generate_query_or_respond(state: MessagesState):
     """
 
     print("generate_query_or_respond called")
-
-        # Force the model to always include source link if available
-    instruction_msg = {
-        "role": "system", 
-        "content": (
-            "For news (global affairs, international relations, international affairs), intercurrent events, or time-sensitive information, ALWAYS use tools to get the latest data and article link."
-            "Format sources as: Source: [working_link]"
-        )
-    }
-
-    # Insert this instruction at the start
-    messages = [instruction_msg] + state["messages"]
     
     response = (
         response_model
@@ -133,15 +142,8 @@ def generate_query_or_respond(state: MessagesState):
 
 # ==============================================================================
 # Grading documents for relevance
-GRADE_PROMPT = (
-    "You are a grader assessing relevance of a retrieved document to a user question. \n "
-    "Here is the retrieved document: \n\n {context} \n\n"
-    "Here is the user question: {question} \n"
-    "If the document contains keyword(s) or semantic meaning related to the user question, grade it as relevant. \n"
-    "Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question. Only respond with 'yes' or 'no', nothing else."
-)
 
-grader_model = init_chat_model("openai:gpt-4.1", temperature=0, streaming=False)
+grader_model = ChatOpenAI(model="gpt-4.1", temperature=0)
 
 def grade_documents(state: MessagesState) -> Literal["generate_answer", "rewrite_question"]:
     """Determine whether the retrieved documents are relevant to the question."""
@@ -166,21 +168,15 @@ def grade_documents(state: MessagesState) -> Literal["generate_answer", "rewrite
         score = "no"
 
     if score == "yes":
+        print("Documents are relevant.")
         return "generate_answer"
     else:
+        print("question ----> ", question, "\n", "context ----> ", context)
+        print("Documents are not relevant, rewrite the question.")
         return "rewrite_question"
     
 # ==========================================================================
 # Rewrite the question to improve semantic intent
-REWRITE_PROMPT = (
-    "Look at the input and try to reason about the underlying semantic intent / meaning.\n"
-    "Here is the initial question:"
-    "\n ------- \n"
-    "{question}"
-    "\n ------- \n"
-    "Formulate an improved question:"
-)
-
 
 def rewrite_question(state: MessagesState):
     """Rewrite the original user question."""
@@ -192,20 +188,11 @@ def rewrite_question(state: MessagesState):
     
     prompt = REWRITE_PROMPT.format(question=question)
     response = response_model.invoke([{"role": "user", "content": prompt}])
-    
+    # print(response.content)
     return {"messages": [AIMessage(content=response.content)]}   
 
 # ==========================================================================
 # Generate the final answer based on the retrieved documents
-GENERATE_PROMPT = (
-    "You are an assistant for question-answering tasks. "
-    "Use the following pieces of retrieved context to answer the question. "
-    "If you don't know the answer, just say that you don't know. "
-    "Give answer in five sentences and keep the answer concise. For more details give the Reuters article link from context\n"
-    "Question: {question} \n"
-    "Context: {context}"
-)
-
 
 def generate_answer(state: MessagesState):
     """Generate an answer."""
@@ -214,6 +201,7 @@ def generate_answer(state: MessagesState):
 
     question = state["messages"][-2].content
     context = state["messages"][-1].content
+    # print("Context for answer generation: ------------>", context)
     
     prompt = GENERATE_PROMPT.format(question=question, context=context)
     
@@ -256,6 +244,8 @@ workflow.add_conditional_edges(
 workflow.add_edge("generate_answer", END)
 workflow.add_edge("rewrite_question", "generate_query_or_respond")
 
+# graph = workflow.compile(checkpointer=checkpointer)
+
 # ==========================================================================
 
 def count_tokens(messages):
@@ -275,7 +265,7 @@ def count_tokens(messages):
             elif role == "ai":
                 role = "assistant"
             elif role == "tool":
-                # Skip tool messages or convert to user message for token counting
+                # convert tool messages to user message for token counting
                 role = "user"
                 content = f"Tool result: {content}" 
             
@@ -287,7 +277,7 @@ def count_tokens(messages):
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=openai_messages,
-            max_tokens=1,  # only want the token count, not the response
+            max_tokens=1,  # We only want the token count, not the response
             stream=False
         )
         return response.usage.prompt_tokens
@@ -298,6 +288,7 @@ def count_tokens(messages):
 def trim_messages(messages, max_tokens):
     """Trim messages to stay within token limit while preserving conversation flow."""
     
+    print("trim_messages called")
     if not messages:
         print("No messages are available to trim.")
         return messages
@@ -352,11 +343,6 @@ async def run_workflow(query: str, thread_id: str, max_tokens):
     
     # Add system message if conversation is new
     if not existing_messages:
-        sys_msg = {"role": "system", "content": "You are a helpful AI assistant. Never use your context for news always use tools for news (global affairs, international relations, international affairs) to get the data and article link."
-            "Format sources as: Source: [link]"        
-            "If you don't know the answer, just say I don't know."
-        ""}
-        
         existing_messages = [sys_msg]
     
     new_message = {"role": "user", "content": query}
@@ -370,9 +356,8 @@ async def run_workflow(query: str, thread_id: str, max_tokens):
 
     config = {"configurable": {"thread_id": thread_id}}
     
-    # return graph.astream({"messages": all_messages}, config)
-    return graph.astream_events({"messages": all_messages}, config, version="v1")
-    
+    # Return async generator (stream)
+    return graph.astream_events({"messages": all_messages}, config, version="v1")    
 
 def print_trimmed_messages(messages):
     for i, msg in enumerate(messages, 1):
@@ -385,6 +370,7 @@ async def get_full_conversation(thread_id: str):
 
      # Get the checkpointer from the initialized graph
     global checkpointer
+    
     if checkpointer is None:
         # Initialize if not done yet
         await get_graph()
@@ -395,6 +381,7 @@ async def get_full_conversation(thread_id: str):
     state_tuple = await checkpointer.aget_tuple(config)
     
     if not state_tuple or not state_tuple.checkpoint.get("channel_values", {}).get("messages"):
+        # print("No conversation found for this thread.")
         return []
     
     
@@ -407,7 +394,6 @@ async def get_full_conversation(thread_id: str):
 
 async def show_full_conversation(thread_id: str):
     """Display the full conversation for a given thread."""
-    
     messages = await get_full_conversation(thread_id)
     if not messages:
         print("No conversation found for this thread.")
@@ -452,11 +438,11 @@ async def get_all_thread_ids(user_id: str):
            
            for checkpoint_tuple in checkpoints:
                thread_id = checkpoint_tuple.config.get("configurable", {}).get("thread_id")
-               
+               # print(f"Processing thread_id: {thread_id}")
 
                # Only include threads that belong to this user
                if thread_id and thread_id.startswith(f"{user_id}_"):
-                  
+                   
                    # Skip if we already processed this thread_id
                    if thread_id and thread_id not in seen_threads:
                        seen_threads.add(thread_id)
@@ -491,13 +477,14 @@ async def get_all_thread_ids(user_id: str):
                                "thread_id": thread_id,
                                "title": title
                            })
-                           
+                           #    print(f"Added thread: {thread_id} - {title}")
        except asyncio.TimeoutError:
            print("Timeout waiting for checkpointer.alist() - returning partial results")
        except Exception as list_error:
            print(f"Error in checkpointer.alist(): {list_error}")
            return []
        
+       #    print(f"Final thread_data: {thread_data}")
             
        print(f"Found {len(thread_data)} unique threads.")
        return thread_data
@@ -508,14 +495,3 @@ async def get_all_thread_ids(user_id: str):
        traceback.print_exc()
        return []
 # ==========================================================================
-
-if __name__ == "__main__":
-
-    thread_id = "session_6"
-
-    query = "African Development Bank loan to South Africa for energy and rail infrastructure improvements"
-    
-    run_workflow(query, thread_id, 128000)      
-    
-    # Print the full conversation
-    show_full_conversation(thread_id)
